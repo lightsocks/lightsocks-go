@@ -4,11 +4,11 @@ package main
 import (
 	"crypto/cipher"
 	"encoding/binary"
+	"errors"
 	"io"
 	"log"
 	"net"
 	"strconv"
-	"errors"
 )
 
 var (
@@ -170,7 +170,6 @@ func getRequest(conn net.Conn) (rawaddr []byte, host string, err error) {
 	}
 	port := binary.BigEndian.Uint16(buf[reqLen-2 : reqLen])
 	host = net.JoinHostPort(host, strconv.Itoa(int(port)))
-
 	return
 }
 
@@ -181,7 +180,6 @@ func createServerConn() (remote net.Conn, err error) {
 	}
 	return remote, err
 }
-
 
 func localToRemote(conn net.Conn, remote net.Conn, rawaddr []byte) {
 
@@ -199,7 +197,7 @@ func localToRemote(conn net.Conn, remote net.Conn, rawaddr []byte) {
 	remote.Write(b)
 	remote.Write(iv)
 
-	stream, err := newModelStream(key, iv,"AES", Encrypt)
+	stream, err := newModelStream(key, iv, "AES", Encrypt)
 	if err != nil {
 		return
 	}
@@ -209,12 +207,16 @@ func localToRemote(conn net.Conn, remote net.Conn, rawaddr []byte) {
 		padding := 16 - validate%16
 		total := validate + padding
 		b := make([]byte, total)
-		for i := 0; i < validate; i++ {
-			b[i] = rawaddr[i]
+		copy(b, rawaddr)
+		if _, err := forwardData(remote, b, stream); err != nil {
+			log.Println("write:", err)
+			return
 		}
-		forwardData(remote, b, stream)
 	} else {
-		forwardData(remote, rawaddr, stream)
+		if _, err := forwardData(remote, rawaddr, stream); err != nil {
+			log.Println("write:", err)
+			return
+		}
 	}
 
 	for {
@@ -230,14 +232,6 @@ func localToRemote(conn net.Conn, remote net.Conn, rawaddr []byte) {
 			}
 		}
 		if err != nil {
-			// Always "use of closed network connection", but no easy way to
-			// identify this specific error. So just leave the error along for now.
-			// More info here: https://code.google.com/p/go/issues/detail?id=4373
-			/*
-				if bool(Debug) && err != io.EOF {
-					Debug.Println("read:", err)
-				}
-			*/
 			break
 		}
 	}
@@ -251,11 +245,14 @@ func remoteToLocal(remote net.Conn, conn net.Conn) {
 	iv := make([]byte, config.crptorParam.ivLen)
 	io.ReadAtLeast(remote, iv, config.crptorParam.ivLen)
 	key := evpBytesToKey(config.password, config.crptorParam.keyLen)
-	stream, err := newModelStream(key, iv,config.crptorParam.cryptType, Decrypt)
+	stream, err := newModelStream(key, iv, config.crptorParam.cryptType, Decrypt)
 	if err != nil {
 		return
 	}
 	_, err = conn.Write([]byte{0x05, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00, 0x08, 0x43})
+	if err != nil {
+		return
+	}
 
 	for {
 		io.ReadAtLeast(remote, dst, 4)
@@ -276,19 +273,10 @@ func remoteToLocal(remote net.Conn, conn net.Conn) {
 			}
 		}
 		if err != nil {
-			// Always "use of closed network connection", but no easy way to
-			// identify this specific error. So just leave the error along for now.
-			// More info here: https://code.google.com/p/go/issues/detail?id=4373
-			/*
-				if bool(Debug) && err != io.EOF {
-					Debug.Println("read:", err)
-				}
-			*/
 			break
 		}
 	}
 }
-
 
 func forwardData(conn net.Conn, data []byte, stream cipher.Stream) (n int, err error) {
 	var left = len(data) % 16
@@ -308,9 +296,7 @@ func forwardData(conn net.Conn, data []byte, stream cipher.Stream) (n int, err e
 	if left != 0 {
 		src := make([]byte, 16)
 		dst := make([]byte, 16)
-		for i := 0; i < left; i++ {
-			src[i] = data[first+i]
-		}
+		copy(src, data[first:])
 		validate := make([]byte, 4)
 		binary.BigEndian.PutUint32(validate, uint32(left))
 		conn.Write(validate)
