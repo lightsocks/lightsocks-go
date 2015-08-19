@@ -70,3 +70,12 @@ func evpBytesToKey(password string, keyLen int) (key []byte) {
 	}
 	return m[:keyLen]
 }
+
+var aes1 = CrptorParam{16, 16, "AES"}
+
+func getCrptorParam(method string) *CrptorParam {
+	if method == "aes-cfb-128" {
+		return &aes1
+	}
+	return &aes1
+}
