@@ -13,8 +13,8 @@ func main() {
 	config.localPort = 1080
 	config.serverIp = "127.0.0.1"
 	config.serverPort = 8888
-	config.method ="aes-cfb-128"
-	config.password="Password!01"
+	config.method = "aes-cfb-128"
+	config.password = "Password!01"
 	config.crptorParam = getCrptorParam(config.method)
 	listen(config.localIp, config.localPort)
 }
@@ -32,4 +32,3 @@ func listen(localAddress string, port int) {
 		go handleConnection(conn)
 	}
 }
-

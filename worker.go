@@ -26,16 +26,9 @@ const (
 )
 
 func handleConnection(conn net.Conn) {
-	closed := false
-	defer func() {
-		if !closed {
-			conn.Close()
-		}
-	}()
-
 	var err error = nil
 	if err = handShake(conn); err != nil {
-		log.Println("socks handshake:", err)
+		log.Fatalln("socks handshake:", err)
 		return
 	}
 	rawaddr, addr, err := getRequest(conn)
@@ -53,15 +46,8 @@ func handleConnection(conn net.Conn) {
 		return
 	}
 
-	defer func() {
-		if !closed {
-			remote.Close()
-		}
-	}()
-
 	go localToRemote(conn, remote, rawaddr)
 	remoteToLocal(remote, conn)
-	closed = true
 }
 
 func handShake(conn net.Conn) (err error) {
@@ -182,22 +168,27 @@ func createServerConn() (remote net.Conn, err error) {
 }
 
 func localToRemote(conn net.Conn, remote net.Conn, rawaddr []byte) {
-
 	defer remote.Close()
-	//write iv
+	//send iv
 	iv, err := initIV(config.crptorParam.ivLen)
 	if err != nil {
 		return
 	}
 	key := evpBytesToKey(config.password, config.crptorParam.keyLen)
 
-	b := make([]byte, 4)
-	binary.BigEndian.PutUint32(b, uint32(config.crptorParam.ivLen))
-	remote.Write(b)
-	remote.Write(b)
-	remote.Write(iv)
+	head := make([]byte, 4)
+	binary.BigEndian.PutUint32(head, uint32(config.crptorParam.ivLen))
+	if _, err := remote.Write(head); err != nil {
+		return
+	}
+	if _, err := remote.Write(head); err != nil {
+		return
+	}
+	if _, err := remote.Write(iv); err != nil {
+		return
+	}
 
-	stream, err := newModelStream(key, iv, "AES", Encrypt)
+	stream, err := newModelStream(key, iv, config.crptorParam.cryptType, Encrypt)
 	if err != nil {
 		return
 	}
@@ -206,28 +197,25 @@ func localToRemote(conn net.Conn, remote net.Conn, rawaddr []byte) {
 	if validate > 16 {
 		padding := 16 - validate%16
 		total := validate + padding
-		b := make([]byte, total)
-		copy(b, rawaddr)
-		if _, err := forwardData(remote, b, stream); err != nil {
-			log.Println("write:", err)
+		address := make([]byte, total)
+		copy(address, rawaddr)
+		if _, err := forwardData(remote, address, stream); err != nil {
 			return
 		}
 	} else {
 		if _, err := forwardData(remote, rawaddr, stream); err != nil {
-			log.Println("write:", err)
 			return
 		}
 	}
 
+	buf := make([]byte, 4096)
 	for {
-		buf := make([]byte, 4096)
 		n, err := conn.Read(buf)
 		// read may return EOF with n > 0
 		// should always process n > 0 bytes before handling error
 		if n > 0 {
 			// Note: avoid overwrite err returned by Read.
 			if _, err := forwardData(remote, buf[0:n], stream); err != nil {
-				log.Println("write:", err)
 				break
 			}
 		}
@@ -239,11 +227,17 @@ func localToRemote(conn net.Conn, remote net.Conn, rawaddr []byte) {
 
 func remoteToLocal(remote net.Conn, conn net.Conn) {
 	defer conn.Close()
-	dst := make([]byte, 4)
-	io.ReadAtLeast(remote, dst, 4)
-	io.ReadAtLeast(remote, dst, 4)
+	head := make([]byte, 4)
+	if _, err := io.ReadAtLeast(remote, head, 4); err != nil {
+		return
+	}
+	if _, err := io.ReadAtLeast(remote, head, 4); err != nil {
+		return
+	}
 	iv := make([]byte, config.crptorParam.ivLen)
-	io.ReadAtLeast(remote, iv, config.crptorParam.ivLen)
+	if _, err := io.ReadAtLeast(remote, iv, config.crptorParam.ivLen); err != nil {
+		return
+	}
 	key := evpBytesToKey(config.password, config.crptorParam.keyLen)
 	stream, err := newModelStream(key, iv, config.crptorParam.cryptType, Decrypt)
 	if err != nil {
@@ -255,10 +249,14 @@ func remoteToLocal(remote net.Conn, conn net.Conn) {
 	}
 
 	for {
-		io.ReadAtLeast(remote, dst, 4)
-		validate := binary.BigEndian.Uint32(dst)
-		io.ReadAtLeast(remote, dst, 4)
-		length := binary.BigEndian.Uint32(dst)
+		if _, err := io.ReadAtLeast(remote, head, 4); err != nil {
+			break
+		}
+		validate := binary.BigEndian.Uint32(head)
+		if _, err := io.ReadAtLeast(remote, head, 4); err != nil {
+			break
+		}
+		length := binary.BigEndian.Uint32(head)
 		src := make([]byte, length)
 		dst := make([]byte, length)
 		n, err := io.ReadAtLeast(remote, src, int(length))
@@ -268,7 +266,6 @@ func remoteToLocal(remote net.Conn, conn net.Conn) {
 		if n > 0 {
 			// Note: avoid overwrite err returned by Read.
 			if _, err := conn.Write(dst[0:validate]); err != nil {
-				log.Println("write:", err)
 				break
 			}
 		}
@@ -279,32 +276,31 @@ func remoteToLocal(remote net.Conn, conn net.Conn) {
 }
 
 func forwardData(conn net.Conn, data []byte, stream cipher.Stream) (n int, err error) {
-	var left = len(data) % 16
-	var first = len(data) - left
-	err = nil
-	var m1 = 0
-	var m2 = 0
+	left := len(data) % 16
+	first := len(data) - left
+	n1 := 0
 	if first != 0 {
-		dst := make([]byte, first)
-		validate := make([]byte, 4)
-		binary.BigEndian.PutUint32(validate, uint32(first))
-		conn.Write(validate)
-		conn.Write(validate)
-		stream.XORKeyStream(dst, data[0:first])
-		m1, err = conn.Write(dst)
+		dst := make([]byte, 8+first)
+		binary.BigEndian.PutUint32(dst, uint32(first))
+		binary.BigEndian.PutUint32(dst[4:], uint32(first))
+		stream.XORKeyStream(dst[8:], data[0:first])
+		n1, err = conn.Write(dst)
+		if err != nil {
+			return n1, err
+		}
 	}
+	n2 := 0
 	if left != 0 {
 		src := make([]byte, 16)
-		dst := make([]byte, 16)
+		dst := make([]byte, 8+16)
 		copy(src, data[first:])
-		validate := make([]byte, 4)
-		binary.BigEndian.PutUint32(validate, uint32(left))
-		conn.Write(validate)
-		length := make([]byte, 4)
-		binary.BigEndian.PutUint32(length, uint32(16))
-		conn.Write(length)
-		stream.XORKeyStream(dst, src)
-		m2, err = conn.Write(dst)
+		binary.BigEndian.PutUint32(dst, uint32(left))
+		binary.BigEndian.PutUint32(dst[4:], uint32(16))
+		stream.XORKeyStream(dst[8:], src)
+		n2, err = conn.Write(dst)
+		if err != nil {
+			return n2, err
+		}
 	}
-	return m1 + m2, err
+	return n1 + n2, err
 }
