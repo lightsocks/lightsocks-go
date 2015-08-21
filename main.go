@@ -30,7 +30,7 @@ func main() {
 		flag.PrintDefaults()
 		return
 	}
-	if checkConifg(config) == false {
+	if !(&config).checkConifg() {
 		return
 	}
 	config.CrptorParam = getCrptorParam(config.Method)

@@ -23,7 +23,7 @@ type Config struct {
 	CrptorParam *CrptorParam
 }
 
-func parseConfig(configFile string) (config Config, err error) {
+func parseConfig(configFile string) (config *Config, err error) {
 	file, err := os.Open(configFile) // For read access.
 	if err != nil {
 		return
@@ -34,11 +34,12 @@ func parseConfig(configFile string) (config Config, err error) {
 	if err != nil {
 		return
 	}
-	err = json.Unmarshal(data, &config)
-	return config, err
+	config = &Config{}
+	err = json.Unmarshal(data, config)
+	return 
 }
 
-func checkConifg(config Config) bool {
+func(config *Config) checkConifg() bool {
 	if config.ServerIp == "" {
 		return false
 	}
