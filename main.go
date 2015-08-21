@@ -2,6 +2,8 @@
 package main
 
 import (
+	"flag"
+	"log"
 	"net"
 	"strconv"
 )
@@ -9,18 +11,36 @@ import (
 var config Config
 
 func main() {
-	config.localIp = "127.0.0.1"
-	config.localPort = 1080
-	config.serverIp = "127.0.0.1"
-	config.serverPort = 8888
-	config.method = "aes-cfb-128"
-	config.password = "Password!01"
-	config.crptorParam = getCrptorParam(config.method)
-	listen(config.localIp, config.localPort)
+	var configFile string
+	flag.StringVar(&configFile, "-c", "config.json", "specify config file")
+	myconfig, err := parseConfig(configFile)
+	flag.StringVar(&config.ServerIp, "-s", myconfig.ServerIp, "server address")
+	flag.IntVar(&config.ServerPort, "-p", myconfig.ServerPort, "server port")
+	flag.StringVar(&config.Password, "-k", myconfig.Password, "password")
+	flag.StringVar(&config.Method, "-m", myconfig.Method, "encryption method, default: aes-128-cfb")
+	flag.StringVar(&config.LocalIp, "-b", myconfig.LocalIp, "local address")
+	flag.IntVar(&config.LocalPort, "-l", myconfig.LocalPort, "local port")
+	if err != nil {
+		log.Println("parse config error:", err)
+	}
+	var help string
+	flag.StringVar(&help, "-h", "1", "help")
+	flag.Parse()
+	if help != "1" {
+		flag.PrintDefaults()
+		return
+	}
+	if checkConifg(config) == false {
+		return
+	}
+	config.CrptorParam = getCrptorParam(config.Method)
+	listen(config.LocalIp, config.LocalPort)
 }
 
 func listen(localAddress string, port int) {
-	ln, err := net.Listen("tcp", localAddress+":"+strconv.Itoa(port))
+	var address = localAddress + ":" + strconv.Itoa(port)
+	log.Println("proxy is ready ,address:", address)
+	ln, err := net.Listen("tcp", address)
 	if err != nil {
 		// handle error
 	}

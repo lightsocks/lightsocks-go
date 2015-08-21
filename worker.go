@@ -160,7 +160,7 @@ func getRequest(conn net.Conn) (rawaddr []byte, host string, err error) {
 }
 
 func createServerConn() (remote net.Conn, err error) {
-	remote, err = net.Dial("tcp", config.serverIp+":"+strconv.Itoa(config.serverPort))
+	remote, err = net.Dial("tcp", config.ServerIp+":"+strconv.Itoa(config.ServerPort))
 	if err != nil {
 		return nil, err
 	}
@@ -170,14 +170,14 @@ func createServerConn() (remote net.Conn, err error) {
 func localToRemote(conn net.Conn, remote net.Conn, rawaddr []byte) {
 	defer remote.Close()
 	//send iv
-	iv, err := initIV(config.crptorParam.ivLen)
+	iv, err := initIV(config.CrptorParam.ivLen)
 	if err != nil {
 		return
 	}
-	key := evpBytesToKey(config.password, config.crptorParam.keyLen)
+	key := evpBytesToKey(config.Password, config.CrptorParam.keyLen)
 
 	head := make([]byte, 4)
-	binary.BigEndian.PutUint32(head, uint32(config.crptorParam.ivLen))
+	binary.BigEndian.PutUint32(head, uint32(config.CrptorParam.ivLen))
 	if _, err := remote.Write(head); err != nil {
 		return
 	}
@@ -188,7 +188,7 @@ func localToRemote(conn net.Conn, remote net.Conn, rawaddr []byte) {
 		return
 	}
 
-	stream, err := newModelStream(key, iv, config.crptorParam.cryptType, Encrypt)
+	stream, err := newModelStream(key, iv, config.CrptorParam.cryptType, Encrypt)
 	if err != nil {
 		return
 	}
@@ -234,12 +234,12 @@ func remoteToLocal(remote net.Conn, conn net.Conn) {
 	if _, err := io.ReadAtLeast(remote, head, 4); err != nil {
 		return
 	}
-	iv := make([]byte, config.crptorParam.ivLen)
-	if _, err := io.ReadAtLeast(remote, iv, config.crptorParam.ivLen); err != nil {
+	iv := make([]byte, config.CrptorParam.ivLen)
+	if _, err := io.ReadAtLeast(remote, iv, config.CrptorParam.ivLen); err != nil {
 		return
 	}
-	key := evpBytesToKey(config.password, config.crptorParam.keyLen)
-	stream, err := newModelStream(key, iv, config.crptorParam.cryptType, Decrypt)
+	key := evpBytesToKey(config.Password, config.CrptorParam.keyLen)
+	stream, err := newModelStream(key, iv, config.CrptorParam.cryptType, Decrypt)
 	if err != nil {
 		return
 	}
