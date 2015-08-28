@@ -39,12 +39,14 @@ func main() {
 }
 
 func listen(localAddress string, port int) {
-	var address = localAddress + ":" + strconv.Itoa(port)
-	log.Println("proxy is ready ,address:", address)
 	ln, err := net.Listen("tcp", address)
 	if err != nil {
 		// handle error
 	}
+
+	var address = localAddress + ":" + strconv.Itoa(port)
+	log.Println("proxy is ready ,address:", address)
+
 	for {
 		conn, err := ln.Accept()
 		if err != nil {
