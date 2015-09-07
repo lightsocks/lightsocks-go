@@ -1,2 +1,2 @@
 # lightsocks-go
-lightsocks client implements by Golang
+lightsocks client implements by Golang.
